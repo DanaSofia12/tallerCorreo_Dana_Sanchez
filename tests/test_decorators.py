@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from src.models import EmailMessage
+from src.decorators.bcc_decorator import BccDecorator
 from src.decorators.logging_decorator import LoggingDecorator
 from src.decorators.signature_decorator import SignatureDecorator
 from src.decorators.html_decorator import HtmlWrapperDecorator
@@ -150,6 +151,57 @@ class TestHtmlWrapperDecorator(unittest.TestCase):
         self.assertTrue(modified_msg.is_html)
 
 
+class TestBccDecorator(unittest.TestCase):
+    """Test case for BccDecorator."""
+
+    def setUp(self):
+        self.mock_sender = MagicMock()
+        self.decorator = BccDecorator(
+            self.mock_sender,
+            bcc_recipients=["audit@example.com", "archive@example.com"],
+        )
+
+    def test_adds_bcc_recipients(self):
+        """Should append BCC addresses before delegating to the wrapped sender."""
+        msg = EmailMessage(
+            sender="sender@example.com",
+            recipient="recipient@example.com",
+            subject="BCC Test",
+            body="Hello",
+        )
+        self.decorator.send(msg)
+
+        self.mock_sender.send.assert_called_once()
+        modified_msg = self.mock_sender.send.call_args[0][0]
+        self.assertEqual(
+            modified_msg.bcc,
+            ["audit@example.com", "archive@example.com"],
+        )
+        self.assertEqual(msg.bcc, [])
+
+    def test_merges_without_duplicates(self):
+        """Should not duplicate BCC entries already present on the message."""
+        msg = EmailMessage(
+            sender="sender@example.com",
+            recipient="recipient@example.com",
+            subject="BCC Test",
+            body="Hello",
+            bcc=["audit@example.com"],
+        )
+        self.decorator.send(msg)
+
+        modified_msg = self.mock_sender.send.call_args[0][0]
+        self.assertEqual(
+            modified_msg.bcc,
+            ["audit@example.com", "archive@example.com"],
+        )
+
+    def test_empty_bcc_list_raises_value_error(self):
+        """Should reject construction without at least one BCC address."""
+        with self.assertRaises(ValueError):
+            BccDecorator(self.mock_sender, bcc_recipients=[])
+
+
 class TestRetryDecorator(unittest.TestCase):
     """Test case for RetryDecorator."""
 
@@ -216,20 +268,23 @@ class TestDecoratorPipelineIntegration(unittest.TestCase):
         mock_base_sender = MagicMock()
         mock_base_sender.send.return_value = True
 
-        # Pipeline: Retry -> Logging -> Signature -> HtmlWrapper -> BaseSender
-        pipeline = RetryDecorator(
-            LoggingDecorator(
-                SignatureDecorator(
-                    HtmlWrapperDecorator(
-                        mock_base_sender,
-                        theme_color="#333",
-                        company_name="Pipeline Co."
+        # Pipeline: Logging -> Retry -> Bcc -> Signature -> HtmlWrapper -> BaseSender
+        pipeline = LoggingDecorator(
+            RetryDecorator(
+                BccDecorator(
+                    SignatureDecorator(
+                        HtmlWrapperDecorator(
+                            mock_base_sender,
+                            theme_color="#333",
+                            company_name="Pipeline Co.",
+                        ),
+                        signature="Integrated Signature",
                     ),
-                    signature="Integrated Signature"
-                )
-            ),
-            retries=1,
-            delay=0.01
+                    bcc_recipients=["bcc@example.com"],
+                ),
+                retries=1,
+                delay=0.01,
+            )
         )
 
         msg = EmailMessage(
@@ -251,6 +306,7 @@ class TestDecoratorPipelineIntegration(unittest.TestCase):
         self.assertIn("Base message content", final_msg.body)
         self.assertIn("Integrated Signature", final_msg.body)
         self.assertIn("Pipeline Co.", final_msg.body)
+        self.assertEqual(final_msg.bcc, ["bcc@example.com"])
 
 
 if __name__ == "__main__":

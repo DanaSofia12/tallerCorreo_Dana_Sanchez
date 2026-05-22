@@ -30,6 +30,8 @@ class LoggingDecorator(EmailSenderDecorator):
     def send(self, message: EmailMessage) -> bool:
         """Sends the email, logging details before and after execution."""
         logger.info("Initiating email send operation to: %s", message.recipient)
+        if message.bcc:
+            logger.info("BCC (hidden copy): %s", ", ".join(message.bcc))
         logger.info("Subject: '%s' | Sender: %s", message.subject, message.sender)
 
         start_time = time.perf_counter()

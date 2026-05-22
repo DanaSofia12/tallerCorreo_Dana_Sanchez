@@ -43,6 +43,8 @@ class BaseEmailSender(EmailSender):
             f.write("--- SIMULATED EMAIL HEADERS ---\n")
             f.write(f"From: {message.sender}\n")
             f.write(f"To: {message.recipient}\n")
+            if message.bcc:
+                f.write(f"Bcc: {', '.join(message.bcc)}\n")
             f.write(f"Subject: {message.subject}\n")
             for k, v in message.headers.items():
                 f.write(f"{k}: {v}\n")
@@ -54,6 +56,8 @@ class BaseEmailSender(EmailSender):
         print("\n" + "=" * 50)
         print(" [SIMULATED EMAIL SENT SUCCESSFULLY] ")
         print(f"  To:       {message.recipient}")
+        if message.bcc:
+            print(f"  Bcc:      {', '.join(message.bcc)}")
         print(f"  Subject:  {message.subject}")
         print(f"  Saved to: {file_path.relative_to(config.BASE_DIR)}")
         print("=" * 50 + "\n")
@@ -66,6 +70,8 @@ class BaseEmailSender(EmailSender):
         mime_msg["From"] = message.sender
         mime_msg["To"] = message.recipient
         mime_msg["Subject"] = message.subject
+        if message.bcc:
+            mime_msg["Bcc"] = ", ".join(message.bcc)
 
         # Add custom headers if any
         for k, v in message.headers.items():
@@ -88,7 +94,8 @@ class BaseEmailSender(EmailSender):
             if config.SMTP_PASSWORD:
                 server.login(config.SMTP_USER, config.SMTP_PASSWORD)
 
-            server.sendmail(message.sender, message.recipient, mime_msg.as_string())
+            all_recipients = [message.recipient, *message.bcc]
+            server.sendmail(message.sender, all_recipients, mime_msg.as_string())
             return True
         except Exception as e:
             # Re-raise to let decorators handle or report the issue

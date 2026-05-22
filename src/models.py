@@ -17,6 +17,7 @@ class EmailMessage:
     subject: str
     body: str
     is_html: bool = False
+    bcc: List[str] = field(default_factory=list)
     attachments: List[str] = field(default_factory=list)
     headers: dict = field(default_factory=dict)
 
@@ -28,3 +29,6 @@ class EmailMessage:
             raise ValueError(f"Invalid recipient address: '{self.recipient}'")
         if not self.subject.strip():
             raise ValueError("Subject cannot be empty or only whitespace")
+        for address in self.bcc:
+            if not address or "@" not in address:
+                raise ValueError(f"Invalid BCC address: '{address}'")
