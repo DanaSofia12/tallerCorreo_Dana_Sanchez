@@ -24,6 +24,8 @@ except ValueError:
 SMTP_USER = os.getenv("SMTP_USER", "dsofia0528@gmail.com")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 BCC_RECIPIENT = os.getenv("BCC_RECIPIENT", "dasanchez70@unisalle.edu.co")
+DEFAULT_ATTACHMENT = BASE_DIR / "assets" / "notificacion_taller.txt"
+EMAIL_PRIORITY = os.getenv("EMAIL_PRIORITY", "high").lower()
 SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "True").lower() in ("true", "1", "yes")
 
 # Simulation mode (True by default for safe local development/testing)

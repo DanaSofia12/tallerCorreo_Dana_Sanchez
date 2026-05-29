@@ -1,0 +1,7 @@
+Taller Correo — Patrón Decorator
+================================
+
+Este archivo se adjunta automáticamente mediante AttachmentDecorator.
+
+Universidad de La Salle — Ingeniería de Software
+Sistema de notificaciones · tallerCorreo v1.0.0

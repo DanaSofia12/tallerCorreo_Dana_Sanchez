@@ -1,15 +1,17 @@
 """Main script demonstrating the Email Sender with the Decorator Pattern.
 
 Sends a single notification email that exercises every decorator in one pipeline:
-logging, retries, BCC, signature, and HTML template.
+logging, retries, BCC, signature, HTML template, file attachment, and priority.
 """
 
 import datetime
 
 import config
+from src.decorators.attachment_decorator import AttachmentDecorator
 from src.decorators.bcc_decorator import BccDecorator
 from src.decorators.html_decorator import HtmlWrapperDecorator
 from src.decorators.logging_decorator import LoggingDecorator
+from src.decorators.priority_decorator import PriorityDecorator
 from src.decorators.retry_decorator import RetryDecorator
 from src.decorators.signature_decorator import SignatureDecorator
 from src.models import EmailMessage
@@ -21,21 +23,27 @@ def build_notification_pipeline() -> BccDecorator:
     base_sender = BaseEmailSender()
 
     # Bcc outermost so LoggingDecorator can audit hidden copies.
-    # Inner → outer: Base → Html → Signature → Retry → Logging → Bcc
+    # Inner → outer: Base → Html → Signature → Attachment → Priority → Retry → Logging → Bcc
     return BccDecorator(
         LoggingDecorator(
             RetryDecorator(
-                SignatureDecorator(
-                    HtmlWrapperDecorator(
-                        base_sender,
-                        theme_color="#4f46e5",
-                        company_name="Taller Correo — Patrón Decorator",
+                PriorityDecorator(
+                    AttachmentDecorator(
+                        SignatureDecorator(
+                            HtmlWrapperDecorator(
+                                base_sender,
+                                theme_color="#4f46e5",
+                                company_name="Taller Correo — Patrón Decorator",
+                            ),
+                            signature=(
+                                "Dana Sofía Sánchez\n"
+                                "Ingeniería de Software — Universidad de La Salle\n"
+                                "Sistema de notificaciones · tallerCorreo v1.0.0"
+                            ),
+                        ),
+                        attachment_paths=config.DEFAULT_ATTACHMENT,
                     ),
-                    signature=(
-                        "Dana Sofía Sánchez\n"
-                        "Ingeniería de Software — Universidad de La Salle\n"
-                        "Sistema de notificaciones · tallerCorreo v1.0.0"
-                    ),
+                    priority=config.EMAIL_PRIORITY,
                 ),
                 retries=2,
                 delay=0.1,
@@ -47,7 +55,7 @@ def build_notification_pipeline() -> BccDecorator:
 
 def main() -> None:
     """Send one definitive notification email using all decorators."""
-    recipient_email = "raranda@unisalle.edu.co"
+    recipient_email = "dsofia0528@gmail.com"
     sender_email = "taller.correo.decorator@gmail.com"
     issued_at = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
 
@@ -55,9 +63,12 @@ def main() -> None:
     print(" SISTEMA DE NOTIFICACIONES — ENVÍO ÚNICO CON PATRÓN DECORATOR ".center(78))
     print("=" * 80)
     print(
-        "\nPipeline activo: Bcc → Logging → Retry → Signature → HtmlWrapper → Base\n"
+        "\nPipeline: Bcc → Logging → Retry → Priority → Attachment → "
+        "Signature → HtmlWrapper → Base\n"
         f"Destinatario visible (To): {recipient_email}\n"
         f"Copia oculta (Bcc):       {config.BCC_RECIPIENT}\n"
+        f"Adjunto:                  {config.DEFAULT_ATTACHMENT.name}\n"
+        f"Prioridad:                {config.EMAIL_PRIORITY}\n"
     )
 
     sender = build_notification_pipeline()
@@ -75,7 +86,9 @@ def main() -> None:
             f"• Firma corporativa insertada automáticamente\n"
             f"• Copia oculta (BCC) hacia el buzón de auditoría\n"
             f"• Registro de actividad en consola y en logs/email_system.log\n"
-            f"• Reintentos automáticos ante fallos transitorios de red\n\n"
+            f"• Reintentos automáticos ante fallos transitorios de red\n"
+            f"• Archivo adjunto: {config.DEFAULT_ATTACHMENT.name}\n"
+            f"• Prioridad del mensaje: {config.EMAIL_PRIORITY.upper()}\n\n"
             f"No es necesario realizar ninguna acción. Este correo confirma que "
             f"el taller de correo electrónico está operativo y listo para revisión."
         ),

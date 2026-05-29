@@ -6,7 +6,10 @@ It complies with PEP 8 and Clean Code guidelines.
 """
 
 import datetime
+import mimetypes
 import smtplib
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -49,8 +52,18 @@ class BaseEmailSender(EmailSender):
             for k, v in message.headers.items():
                 f.write(f"{k}: {v}\n")
             f.write(f"Format: {'HTML' if message.is_html else 'Plain Text'}\n")
+            if message.priority:
+                f.write(f"Priority: {message.priority}\n")
+            if message.attachments:
+                f.write(f"Attachments: {', '.join(message.attachments)}\n")
             f.write("-------------------------------\n\n")
             f.write(message.body)
+            if message.attachments:
+                f.write("\n\n--- ATTACHED FILES (simulated) ---\n")
+                for attachment_path in message.attachments:
+                    path = Path(attachment_path)
+                    f.write(f"\n[{path.name}]\n")
+                    f.write(path.read_text(encoding="utf-8", errors="replace"))
 
         # Print clean preview to stdout
         print("\n" + "=" * 50)
@@ -59,27 +72,64 @@ class BaseEmailSender(EmailSender):
         if message.bcc:
             print(f"  Bcc:      {', '.join(message.bcc)}")
         print(f"  Subject:  {message.subject}")
+        if message.priority:
+            print(f"  Priority: {message.priority}")
+        if message.attachments:
+            print(f"  Files:    {', '.join(Path(p).name for p in message.attachments)}")
         print(f"  Saved to: {file_path.relative_to(config.BASE_DIR)}")
         print("=" * 50 + "\n")
         return True
 
-    def _send_real(self, message: EmailMessage) -> bool:
-        """Sends a real email using SMTP protocol."""
-        # Create message container
-        mime_msg = MIMEMultipart("alternative")
+    def _build_mime_message(self, message: EmailMessage) -> MIMEMultipart:
+        """Builds a MIME message with body, optional attachments, and headers."""
+        if message.attachments:
+            mime_msg: MIMEMultipart = MIMEMultipart("mixed")
+            body_container = MIMEMultipart("alternative")
+            body_container.attach(
+                MIMEText(message.body, "html" if message.is_html else "plain", "utf-8")
+            )
+            mime_msg.attach(body_container)
+            for attachment_path in message.attachments:
+                mime_msg.attach(self._build_attachment_part(attachment_path))
+        else:
+            mime_msg = MIMEMultipart("alternative")
+            mime_msg.attach(
+                MIMEText(message.body, "html" if message.is_html else "plain", "utf-8")
+            )
+
         mime_msg["From"] = message.sender
         mime_msg["To"] = message.recipient
         mime_msg["Subject"] = message.subject
         if message.bcc:
             mime_msg["Bcc"] = ", ".join(message.bcc)
+        for key, value in message.headers.items():
+            mime_msg[key] = value
+        return mime_msg
 
-        # Add custom headers if any
-        for k, v in message.headers.items():
-            mime_msg[k] = v
+    @staticmethod
+    def _build_attachment_part(attachment_path: str) -> MIMEBase:
+        """Creates a MIME part for a file attachment."""
+        path = Path(attachment_path)
+        mime_type, _ = mimetypes.guess_type(path.name)
+        if mime_type:
+            maintype, subtype = mime_type.split("/", 1)
+        else:
+            maintype, subtype = "application", "octet-stream"
 
-        # Record the MIME types of both parts - text/plain and text/html.
-        part = MIMEText(message.body, "html" if message.is_html else "plain", "utf-8")
-        mime_msg.attach(part)
+        with open(path, "rb") as attachment_file:
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(attachment_file.read())
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            "attachment",
+            filename=path.name,
+        )
+        return part
+
+    def _send_real(self, message: EmailMessage) -> bool:
+        """Sends a real email using SMTP protocol."""
+        mime_msg = self._build_mime_message(message)
 
         # Connect to server
         server = None

@@ -19,6 +19,7 @@ class EmailMessage:
     is_html: bool = False
     bcc: List[str] = field(default_factory=list)
     attachments: List[str] = field(default_factory=list)
+    priority: Optional[str] = None
     headers: dict = field(default_factory=dict)
 
     def __post_init__(self):

@@ -8,8 +8,13 @@ import unittest
 from unittest.mock import MagicMock
 
 from src.models import EmailMessage
+import tempfile
+from pathlib import Path
+
+from src.decorators.attachment_decorator import AttachmentDecorator
 from src.decorators.bcc_decorator import BccDecorator
 from src.decorators.logging_decorator import LoggingDecorator
+from src.decorators.priority_decorator import PriorityDecorator
 from src.decorators.signature_decorator import SignatureDecorator
 from src.decorators.html_decorator import HtmlWrapperDecorator
 from src.decorators.retry_decorator import RetryDecorator
@@ -260,6 +265,71 @@ class TestRetryDecorator(unittest.TestCase):
         self.assertEqual(mock_sender.send.call_count, 4)
 
 
+class TestAttachmentDecorator(unittest.TestCase):
+    """Test case for AttachmentDecorator."""
+
+    def setUp(self):
+        self.mock_sender = MagicMock()
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.sample_file = Path(self.temp_dir.name) / "sample.txt"
+        self.sample_file.write_text("attachment content", encoding="utf-8")
+        self.decorator = AttachmentDecorator(
+            self.mock_sender,
+            attachment_paths=str(self.sample_file),
+        )
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_adds_attachment_path(self):
+        """Should append the configured file to message.attachments."""
+        msg = EmailMessage(
+            sender="sender@example.com",
+            recipient="recipient@example.com",
+            subject="Attachment Test",
+            body="Hello",
+        )
+        self.decorator.send(msg)
+
+        modified_msg = self.mock_sender.send.call_args[0][0]
+        self.assertEqual(modified_msg.attachments, [str(self.sample_file.resolve())])
+        self.assertEqual(msg.attachments, [])
+
+    def test_missing_file_raises_file_not_found(self):
+        """Should reject construction when the file does not exist."""
+        with self.assertRaises(FileNotFoundError):
+            AttachmentDecorator(self.mock_sender, attachment_paths="/no/existe.txt")
+
+
+class TestPriorityDecorator(unittest.TestCase):
+    """Test case for PriorityDecorator."""
+
+    def setUp(self):
+        self.mock_sender = MagicMock()
+
+    def test_high_priority_headers(self):
+        """Should set high-priority MIME headers."""
+        decorator = PriorityDecorator(self.mock_sender, priority="high")
+        msg = EmailMessage(
+            sender="sender@example.com",
+            recipient="recipient@example.com",
+            subject="Priority Test",
+            body="Hello",
+        )
+        decorator.send(msg)
+
+        modified_msg = self.mock_sender.send.call_args[0][0]
+        self.assertEqual(modified_msg.priority, "high")
+        self.assertEqual(modified_msg.headers["X-Priority"], "1")
+        self.assertEqual(modified_msg.headers["Importance"], "high")
+        self.assertEqual(modified_msg.headers["Priority"], "urgent")
+
+    def test_invalid_priority_raises_value_error(self):
+        """Should reject unknown priority values."""
+        with self.assertRaises(ValueError):
+            PriorityDecorator(self.mock_sender, priority="urgent")
+
+
 class TestDecoratorPipelineIntegration(unittest.TestCase):
     """Integration test case verifying multiple decorators chained together."""
 
@@ -268,45 +338,57 @@ class TestDecoratorPipelineIntegration(unittest.TestCase):
         mock_base_sender = MagicMock()
         mock_base_sender.send.return_value = True
 
-        # Pipeline: Logging -> Retry -> Bcc -> Signature -> HtmlWrapper -> BaseSender
-        pipeline = LoggingDecorator(
-            RetryDecorator(
-                BccDecorator(
-                    SignatureDecorator(
-                        HtmlWrapperDecorator(
-                            mock_base_sender,
-                            theme_color="#333",
-                            company_name="Pipeline Co.",
+        with tempfile.TemporaryDirectory() as temp_dir:
+            attachment_file = Path(temp_dir) / "pipeline.txt"
+            attachment_file.write_text("pipeline attachment", encoding="utf-8")
+
+            # Pipeline: Logging -> Retry -> Bcc -> Priority -> Attachment -> Signature -> Html -> Base
+            pipeline = LoggingDecorator(
+                RetryDecorator(
+                    BccDecorator(
+                        PriorityDecorator(
+                            AttachmentDecorator(
+                                SignatureDecorator(
+                                    HtmlWrapperDecorator(
+                                        mock_base_sender,
+                                        theme_color="#333",
+                                        company_name="Pipeline Co.",
+                                    ),
+                                    signature="Integrated Signature",
+                                ),
+                                attachment_paths=str(attachment_file),
+                            ),
+                            priority="high",
                         ),
-                        signature="Integrated Signature",
+                        bcc_recipients=["bcc@example.com"],
                     ),
-                    bcc_recipients=["bcc@example.com"],
-                ),
-                retries=1,
-                delay=0.01,
+                    retries=1,
+                    delay=0.01,
+                )
             )
-        )
 
-        msg = EmailMessage(
-            sender="sender@example.com",
-            recipient="recipient@example.com",
-            subject="Pipeline Test",
-            body="Base message content"
-        )
+            msg = EmailMessage(
+                sender="sender@example.com",
+                recipient="recipient@example.com",
+                subject="Pipeline Test",
+                body="Base message content"
+            )
 
-        result = pipeline.send(msg)
+            result = pipeline.send(msg)
 
-        self.assertTrue(result)
-        mock_base_sender.send.assert_called_once()
+            self.assertTrue(result)
+            mock_base_sender.send.assert_called_once()
 
-        # Verify the final modified message received by the base sender
-        final_msg = mock_base_sender.send.call_args[0][0]
-        self.assertTrue(final_msg.is_html)
-        self.assertIn("<!DOCTYPE html>", final_msg.body)
-        self.assertIn("Base message content", final_msg.body)
-        self.assertIn("Integrated Signature", final_msg.body)
-        self.assertIn("Pipeline Co.", final_msg.body)
-        self.assertEqual(final_msg.bcc, ["bcc@example.com"])
+            final_msg = mock_base_sender.send.call_args[0][0]
+            self.assertTrue(final_msg.is_html)
+            self.assertIn("<!DOCTYPE html>", final_msg.body)
+            self.assertIn("Base message content", final_msg.body)
+            self.assertIn("Integrated Signature", final_msg.body)
+            self.assertIn("Pipeline Co.", final_msg.body)
+            self.assertEqual(final_msg.bcc, ["bcc@example.com"])
+            self.assertEqual(final_msg.priority, "high")
+            self.assertEqual(final_msg.headers["Importance"], "high")
+            self.assertEqual(final_msg.attachments, [str(attachment_file.resolve())])
 
 
 if __name__ == "__main__":
